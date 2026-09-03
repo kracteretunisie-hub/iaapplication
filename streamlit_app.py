@@ -1,9 +1,8 @@
 import os
 import streamlit as st
-import fal_client
 
 # ---------------------------------------------------
-# CONFIGURATION
+# CONFIGURATION PAGE
 # ---------------------------------------------------
 
 st.set_page_config(
@@ -13,33 +12,39 @@ st.set_page_config(
 )
 
 st.title("🎬 IA Video Generator")
-
-st.write(
-    "Crée une vidéo avec l'intelligence artificielle."
-)
+st.write("Crée une vidéo avec l'intelligence artificielle.")
 
 # ---------------------------------------------------
-# VERIFICATION DE LA CLE FAL
+# RECUPERER LA CLE AVANT D'IMPORTER fal_client
 # ---------------------------------------------------
 
 if "FAL_KEY" not in st.secrets:
     st.error("❌ FAL_KEY absente dans Streamlit Secrets.")
-    st.info(
-        'Va dans Streamlit Cloud > Settings > Secrets et ajoute :\n\n'
-        'FAL_KEY = "ta_cle_fal"'
-    )
     st.stop()
 
-fal_key = str(st.secrets["FAL_KEY"]).strip()
+fal_key = str(st.secrets["FAL_KEY"])
+
+# Nettoyer espaces et retours à la ligne accidentels
+fal_key = fal_key.replace("\n", "").replace("\r", "").strip()
 
 if not fal_key:
-    st.error("❌ La clé FAL_KEY est vide.")
+    st.error("❌ FAL_KEY est vide.")
     st.stop()
 
-# Envoi de la clé au client fal.ai
+# IMPORTANT :
+# définir FAL_KEY AVANT import fal_client
 os.environ["FAL_KEY"] = fal_key
 
-st.success("✅ Clé fal.ai détectée")
+import fal_client
+
+# ---------------------------------------------------
+# INFORMATIONS DE DIAGNOSTIC
+# ---------------------------------------------------
+
+st.success("✅ Clé fal.ai chargée")
+
+# On n'affiche jamais la vraie clé
+st.caption(f"Clé détectée : {len(fal_key)} caractères")
 
 # ---------------------------------------------------
 # FORMULAIRE
@@ -48,11 +53,11 @@ st.success("✅ Clé fal.ai détectée")
 prompt = st.text_area(
     "Décrivez votre vidéo",
     placeholder=(
-        "Exemple : une femme avec une longue robe rouge "
-        "tourne lentement dans une rue de Paris, "
-        "style cinématographique"
+        "Exemple : une femme avec une longue robe rouge tourne "
+        "lentement dans une rue de Paris au coucher du soleil, "
+        "style cinématographique."
     ),
-    height=140
+    height=150
 )
 
 duration_label = st.selectbox(
@@ -83,7 +88,7 @@ negative_prompt = st.text_input(
 )
 
 # ---------------------------------------------------
-# CONVERSION DES PARAMETRES
+# CONVERSION PARAMETRES
 # ---------------------------------------------------
 
 if duration_label == "5 secondes":
@@ -93,13 +98,15 @@ else:
 
 if format_label.startswith("16:9"):
     aspect_ratio = "16:9"
+
 elif format_label.startswith("9:16"):
     aspect_ratio = "9:16"
+
 else:
     aspect_ratio = "1:1"
 
 # ---------------------------------------------------
-# GENERATION
+# GENERATION VIDEO
 # ---------------------------------------------------
 
 if st.button(
@@ -109,38 +116,39 @@ if st.button(
 ):
 
     if not prompt.strip():
-        st.warning("⚠️ Écris d'abord une description de vidéo.")
+        st.warning("⚠️ Écris d'abord une description.")
         st.stop()
 
     status = st.empty()
 
     status.info(
-        "⏳ Génération en cours... "
-        "Cela peut prendre plusieurs minutes."
+        "⏳ Connexion à fal.ai et génération de la vidéo..."
     )
 
     try:
 
         def on_queue_update(update):
-            try:
-                if isinstance(update, fal_client.InProgress):
-                    if update.logs:
-                        last_log = update.logs[-1]
 
-                        if isinstance(last_log, dict):
-                            message = last_log.get(
-                                "message",
-                                "Génération en cours..."
-                            )
+            if isinstance(update, fal_client.InProgress):
 
-                            status.info(
-                                f"⏳ {message}"
-                            )
-            except Exception:
-                pass
+                if update.logs:
+
+                    last_log = update.logs[-1]
+
+                    if isinstance(last_log, dict):
+
+                        message = last_log.get(
+                            "message",
+                            "Génération en cours..."
+                        )
+
+                        status.info(
+                            f"⏳ {message}"
+                        )
 
         result = fal_client.subscribe(
             "fal-ai/kling-video/v3/standard/text-to-video",
+
             arguments={
                 "prompt": prompt,
                 "duration": duration,
@@ -149,46 +157,40 @@ if st.button(
                 "negative_prompt": negative_prompt,
                 "cfg_scale": 0.5
             },
+
             with_logs=True,
+
             on_queue_update=on_queue_update,
+
             client_timeout=900
         )
 
         # ---------------------------------------------------
-        # VERIFICATION DU RESULTAT
+        # VERIFICATION RESULTAT
         # ---------------------------------------------------
 
         if not result:
             status.empty()
-            st.error("❌ Aucun résultat reçu de fal.ai.")
+            st.error("❌ Aucun résultat reçu.")
             st.stop()
 
         if "video" not in result:
             status.empty()
 
             st.error(
-                "❌ fal.ai a répondu, mais aucune vidéo "
+                "❌ fal.ai a répondu mais aucune vidéo "
                 "n'a été retournée."
             )
 
-            st.write("Réponse reçue :")
             st.json(result)
 
             st.stop()
 
-        video = result["video"]
-
-        if not isinstance(video, dict):
-            status.empty()
-            st.error("❌ Format de réponse vidéo inattendu.")
-            st.json(result)
-            st.stop()
-
-        video_url = video.get("url")
+        video_url = result["video"].get("url")
 
         if not video_url:
             status.empty()
-            st.error("❌ URL de vidéo introuvable.")
+            st.error("❌ URL vidéo introuvable.")
             st.json(result)
             st.stop()
 
@@ -202,23 +204,9 @@ if st.button(
 
         st.video(video_url)
 
-        st.subheader("Informations")
-
-        st.write("**Prompt :**")
-        st.write(prompt)
-
-        st.write(
-            f"**Durée :** {duration} secondes"
-        )
-
-        st.write(
-            f"**Format :** {aspect_ratio}"
-        )
-
-        if generate_audio:
-            st.write("**Audio :** oui")
-        else:
-            st.write("**Audio :** non")
+        st.write("**Prompt :**", prompt)
+        st.write("**Durée :**", duration, "secondes")
+        st.write("**Format :**", aspect_ratio)
 
         st.link_button(
             "⬇️ Ouvrir la vidéo",
@@ -238,13 +226,16 @@ if st.button(
 
         if "invalid key credentials" in error_message.lower():
 
-            st.error(
-                "❌ Clé fal.ai invalide."
+            st.error("❌ fal.ai refuse toujours la clé.")
+
+            st.write(
+                "La clé est bien chargée par Streamlit, "
+                "mais fal.ai ne la reconnaît pas."
             )
 
-            st.warning(
-                "Crée une nouvelle clé API sur fal.ai, "
-                "puis remplace FAL_KEY dans Streamlit Secrets."
+            st.info(
+                "Vérifie que tu as créé une clé avec le scope API "
+                "et que tu as copié la clé complète."
             )
 
         elif (
@@ -253,31 +244,23 @@ if st.button(
             or "credits" in error_message.lower()
         ):
 
-            st.error(
-                "💳 Ton compte fal.ai n'a probablement "
-                "pas assez de crédits."
-            )
+            st.error("💳 Crédits fal.ai insuffisants.")
 
             st.info(
-                "Ajoute des crédits sur ton compte fal.ai "
-                "puis réessaie."
+                "Ton compte fal.ai doit avoir des crédits "
+                "pour utiliser ce modèle."
             )
 
         elif "timeout" in error_message.lower():
 
             st.error(
-                "⏱️ La génération a pris trop de temps."
-            )
-
-            st.info(
-                "Réessaie avec une vidéo plus courte."
+                "⏱️ La génération a dépassé le temps maximum."
             )
 
         else:
 
             st.error(
-                "❌ Une erreur est survenue pendant "
-                "la génération."
+                "❌ Une autre erreur est survenue."
             )
 
             st.exception(e)
