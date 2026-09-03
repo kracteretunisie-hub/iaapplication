@@ -1,2 +1,5 @@
 streamlit
-fal-client
+numpy
+Pillow
+imageio
+imageio-ffmpeg
